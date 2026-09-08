@@ -1,0 +1,42 @@
+appId: com.myraa.desktop
+productName: MYRAA
+copyright: Copyright © 2026 MYRAA
+# Match original layout: LOOSE files under resources/app (no app.asar).
+# The original payload ships resources/app/dist/*, resources/app/assets/*,
+# resources/agent/* as real files; main.cjs spawns dist/server.cjs from disk.
+asar: false
+directories:
+  output: release
+  buildResources: build
+# Packaging hook: version-info/icon stamp + C# launcher swap (mirrors original).
+afterPack: ./electron/afterPack.cjs
+files:
+  - dist/**
+  - assets/**
+  - agent/desktop_agent/**
+  - agent/requirements.txt
+  - docs/CAPABILITIES.md
+  - electron/main.cjs
+  - electron/preload.cjs
+  - electron/splash.html
+  - build/icon.png
+  - package.json
+extraResources: [] # agent exe bundled when present (see README pack:agent); assets ship via files/ above
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+  requestedExecutionLevel: asInvoker
+  # Unsigned sandbox build: skip rcedit/signtool (winCodeSign needs symlink
+  # privilege unavailable here). Version metadata is re-applied post-build
+  # with the already-extracted rcedit-x64.exe — see README.
+  signAndEditExecutable: false
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: MYRAA
+  uninstallDisplayName: MYRAA
+  artifactName: MYRAA-Setup-${version}.${ext}

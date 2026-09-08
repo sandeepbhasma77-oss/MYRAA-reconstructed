@@ -1,0 +1,15 @@
+{
+  "playbackSampleRate": 48000,
+  "bufferRate": 24000,
+  "channels": 1,
+  "bitDepth": 16,
+  "byteLength": 24000,
+  "durationSec": 0.5,
+  "sha256": "937fa50c9a9a5513bf330c2d40fe05396d1c4a24aada1ffae8e463b9bb4fa145",
+  "rms": 0.432,
+  "peak": 0.61,
+  "clippingPct": 0,
+  "zeroCross": 440,
+  "samples": 12000,
+  "savedAt": "2026-09-07T06:19:54.196Z"
+}

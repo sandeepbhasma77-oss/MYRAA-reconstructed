@@ -1,0 +1,11 @@
+fastapi>=0.115
+uvicorn>=0.30
+psutil>=5.9
+pillow>=10.0
+pywin32>=306; sys_platform == 'win32'
+pyautogui>=0.9.54
+pyperclip>=1.10
+mss>=9.0
+pycaw>=20230407; sys_platform == 'win32'
+comtypes>=1.2; sys_platform == 'win32'
+playwright>=1.40

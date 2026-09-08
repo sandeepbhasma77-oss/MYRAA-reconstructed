@@ -1,0 +1,21 @@
+node_modules/
+dist/
+release/
+agent/dist/
+agent/build/
+.pytest_cache/
+*.log
+.DS_Store
+__pycache__/
+*.pyc
+# secrets & personal data — never commit
+secrets.json
+memories.json
+.env
+.env.*
+*.bak-*
+logs/
+task-counter.txt
+# large binaries
+*.exe
+*.zip
