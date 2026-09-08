@@ -32,6 +32,21 @@ export interface StepResult {
   result?: unknown;
   error?: string;
   verified?: boolean;
+  timings?: StepTimings;
+}
+
+export interface StepTimings {
+  routingMs: number;   // permission check + dedup + event emit before exec
+  toolMs: number;      // agent execution (incl. agent-side verify)
+  verifyMs: number;    // server-side second verify round trip (0 when skipped)
+  totalMs: number;
+}
+
+export interface TaskTimings {
+  queueMs: number;     // POST received -> runTask start (event-loop delay)
+  planMs: number;      // parallel-wave planning
+  stepsMs: number;     // all waves wall time
+  totalMs: number;     // runTask start -> terminal state
 }
 
 export interface Task {
@@ -42,6 +57,7 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   error?: string;
+  timings?: TaskTimings;
 }
 
 const tasks = new Map<string, Task>();
@@ -100,29 +116,61 @@ export async function executeVerifiedTool(
   verify?: { tool: string; args: Record<string, unknown> },
 ): Promise<StepResult> {
   taskLog(taskId, `EXEC ${tool} args=${JSON.stringify(redact(args))}`);
+  const t0 = performance.now();
   const r = await callDesktopAgent(tool, args);
+  const toolMs = performance.now() - t0;
   if (!r.ok) {
     const needsConfirm = /confirm_token=|confirmation|Confirm .* token/i.test(String(r.error || ''));
     taskLog(taskId, `FAIL ${tool}: ${String(r.error || '').slice(0, 300)}`);
-    return { tool, ok: false, error: r.error };
+    return { tool, ok: false, error: r.error, timings: { routingMs: 0, toolMs, verifyMs: 0, totalMs: toolMs } };
   }
   let verified = false;
+  let verifyMs = 0;
   if (verify) {
-    const v = await callDesktopAgent(verify.tool, verify.args);
-    verified = v.ok;
-    taskLog(taskId, `VERIFY ${verify.tool}: ${verified ? 'OK' : 'FAILED ' + String(v.error || '').slice(0, 200)}`);
+    // Skip the redundant second round trip when the agent already verified
+    // (e.g. launch_application polls the process itself and reports
+    // verificationResult=verified-running). Saves one full HTTP call.
+    const agentData = (r.result ?? {}) as { data?: { verificationResult?: unknown; verified?: unknown } };
+    const alreadyVerified = agentData?.data?.verificationResult === 'verified-running'
+      || agentData?.data?.verified === true;
+    if (alreadyVerified) {
+      verified = true;
+      taskLog(taskId, `VERIFY ${verify.tool}: SKIPPED (agent already verified)`);
+    } else {
+      const vt0 = performance.now();
+      const v = await callDesktopAgent(verify.tool, verify.args);
+      verifyMs = performance.now() - vt0;
+      verified = v.ok;
+      taskLog(taskId, `VERIFY ${verify.tool}: ${verified ? 'OK' : 'FAILED ' + String(v.error || '').slice(0, 200)}`);
+    }
   }
-  taskLog(taskId, `DONE ${tool} verified=${verified}`);
-  return { tool, ok: true, result: r.result, ...(verify ? { verified } : {}) };
+  const totalMs = performance.now() - t0;
+  taskLog(taskId, `DONE ${tool} verified=${verified} toolMs=${Math.round(toolMs)} verifyMs=${Math.round(verifyMs)}`);
+  return { tool, ok: true, result: r.result, ...(verify ? { verified } : {}), timings: { routingMs: 0, toolMs, verifyMs, totalMs } };
 }
 
+const queueAt = new Map<string, number>(); // POST arrival -> runTask start (event-loop delay)
+
 async function runTask(t: Task): Promise<void> {
+  const runStart = performance.now();
+  const queueMs = queueAt.has(t.id) ? runStart - (queueAt.get(t.id) as number) : 0;
+  queueAt.delete(t.id);
   t.state = 'RUNNING';
   t.updatedAt = new Date().toISOString();
   taskLog(t.id, `START ${t.steps.length} steps`);
   emitTaskEvent({ task_id: t.id, status: 'STARTED', message: "Got it. I'm starting that now.", tool: t.steps[0]?.tool });
   // Parallel planner: waves of independent steps; failures stop the task.
+  const planT0 = performance.now();
   const waves = planParallelWaves(t.steps);
+  const planMs = performance.now() - planT0;
+  const stepsT0 = performance.now();
+  const finishTimings = (extra: Partial<TaskTimings> = {}) => {
+    t.timings = {
+      queueMs, planMs,
+      stepsMs: performance.now() - stepsT0,
+      totalMs: performance.now() - runStart, ...extra,
+    };
+  };
   for (const wave of waves) {
     if (stopAll || t.state === 'CANCELLED') break;
     const bounded = wave.indices.slice(0, PARALLEL_WAVE_CAP);
@@ -130,6 +178,7 @@ async function runTask(t: Task): Promise<void> {
       const step = t.steps[idx];
       // args may be omitted by callers — default before touching `.confirmed`.
       const args = (step.args ?? {}) as Record<string, unknown>;
+      const routeT0 = performance.now();
       const level = await permissionOf(step.tool);
       if (level >= 3 && !args.confirmed) {
         return { step, idx, r: null as StepResult | null, waiting: `Tool ${step.tool} is LEVEL 3 (critical). Re-submit with args.confirmed=true.` };
@@ -144,6 +193,7 @@ async function runTask(t: Task): Promise<void> {
       markActionStarted(step.tool, args);
       try {
         const r = await executeVerifiedTool(t.id, step.tool, args, step.verify);
+        if (r.timings) r.timings.routingMs = performance.now() - routeT0 - (r.timings.totalMs || 0);
         return { step, idx, r, waiting: null };
       } finally {
         markActionFinished(step.tool, args);
@@ -155,6 +205,7 @@ async function runTask(t: Task): Promise<void> {
         t.error = item.waiting;
         taskLog(t.id, `WAITING_CONFIRMATION ${item.step.tool}`);
         emitTaskEvent({ task_id: t.id, status: 'FAILED', message: 'I need your confirmation for that one.', tool: item.step.tool });
+        finishTimings();
         return;
       }
       const r = item.r as StepResult;
@@ -171,6 +222,7 @@ async function runTask(t: Task): Promise<void> {
           t.error = String(r.error);
           emitTaskEvent({ task_id: t.id, status: 'FAILED', message: friendlyFailMessage(item.step.tool, r.error), tool: item.step.tool });
         }
+        finishTimings();
         return;
       }
       emitTaskEvent({ task_id: t.id, status: 'PROGRESS', message: `Finished ${item.step.tool}.`, tool: item.step.tool });
@@ -180,12 +232,14 @@ async function runTask(t: Task): Promise<void> {
     t.state = 'CANCELLED';
     taskLog(t.id, 'CANCELLED');
     emitTaskEvent({ task_id: t.id, status: 'CANCELLED', message: 'Stopped that for you.' });
+    finishTimings();
     return;
   }
   t.state = 'SUCCESS';
   t.updatedAt = new Date().toISOString();
   taskLog(t.id, 'SUCCESS');
   emitTaskEvent({ task_id: t.id, status: 'COMPLETED', message: 'Done.' });
+  finishTimings();
 }
 
 export function registerTaskRoutes(app: Express): void {
@@ -203,6 +257,7 @@ export function registerTaskRoutes(app: Express): void {
         results: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
       tasks.set(t.id, t);
+      queueAt.set(t.id, performance.now());
       emitTaskEvent({ task_id: t.id, status: 'QUEUED', message: 'Queued.' });
       // Bound the registry: evict oldest beyond 200 so long-running servers don't leak.
       while (tasks.size > 200) {

@@ -130,16 +130,16 @@ def close_application(name: str, force: bool = False) -> str:
                     killed.append(base)
             except Exception as e:
                 raise ToolError(f'Could not close {name}: {e}')
-        # Verify before escalating.
-        time.sleep(0.8)
-        alive = _procs_matching(q)
+        # Verify before escalating. Store apps can take seconds to tear down
+        # after taskkill reports success — poll instead of single-sleep check.
+        alive = _wait_gone(q, timeout_s=2.0)
         if not alive:
             break
         if not force and not attempt:
             continue  # polite failed: escalate once
         break
     # Final verdict: honest result, never a blind "requested".
-    still = _procs_matching(q)
+    still = _wait_gone(q, timeout_s=3.0)
     tag = ' (forced)' if forced and killed else ''
     if killed and not still:
         return f'Closed {name}{tag} ({", ".join(killed)}).'
@@ -149,6 +149,18 @@ def close_application(name: str, force: bool = False) -> str:
     if still:
         raise ToolError(f'Could not close {name}: still running ({", ".join(sorted(set(still)))}).')
     return f'{name} was not running.'
+
+
+def _wait_gone(q: str, timeout_s: float = 4.0) -> list:
+    """Poll until no matching process remains (or timeout). Returns fast when
+    the app dies fast; only slow when teardown genuinely lags."""
+    import time as _t
+    deadline = _t.time() + max(0.5, float(timeout_s))
+    alive = _procs_matching(q)
+    while alive and _t.time() < deadline:
+        _t.sleep(0.4)
+        alive = _procs_matching(q)
+    return alive
 
 
 def _procs_matching(q: str) -> list:

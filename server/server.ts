@@ -741,7 +741,11 @@ export async function startServer(): Promise<void> {
     app.use(express.static(distPath));
     app.get('*', (_req, res) => { res.sendFile(path.join(distPath, 'index.html')); });
   }
-  server.listen(PORT, '0.0.0.0', () => {
+  // Dual-stack bind (no host = IPv6 :: with IPv4-mapped): 'localhost' resolves
+  // to ::1 first on Windows, and an IPv4-only bind ('0.0.0.0') forces every
+  // such client through a ~2s connection-fallback stall (measured). Binding
+  // dual-stack removes that latency for browsers, the voice socket, and API.
+  server.listen(PORT, () => {
     logStartup(`MYRAA V2 server started on http://localhost:${PORT}`);
     ensureDesktopAgent().catch((e) => console.warn('[Desktop Agent] boot probe failed:', e?.message || e));
   });
