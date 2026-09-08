@@ -4,13 +4,14 @@
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import http from 'node:http';
 
 export const DESKTOP_AGENT_URL = process.env.DESKTOP_AGENT_URL || 'http://127.0.0.1:8765';
 const DESKTOP_AGENT_TIMEOUT = 15_000; // reduced: most tools respond in <100ms
 
-// OPTIMIZED: HTTP agent with keep-alive for connection reuse (avoids TCP handshake per call).
-const agentHttp = new http.Agent({ keepAlive: true, maxSockets: 20, keepAliveMsecs: 30000 });
+// NOTE: connection reuse comes from undici's default global dispatcher
+// (keep-alive pooling is on by default). Do NOT pass a node:http Agent as
+// `dispatcher` — undici rejects it and EVERY agent call fails with
+// "fetch failed" (this silently broke all backend→agent tools).
 
 // Must stay in sync with agent/desktop_agent/main.py TOOL registry.
 export const DESKTOP_TOOLS = new Set([
@@ -142,14 +143,11 @@ export async function callDesktopAgent(tool: string, args: unknown): Promise<{ o
     const body = JSON.stringify({ tool, args });
     const headers = { 'Content-Type': 'application/json' };
     
-    // Use http agent with keep-alive for connection reuse
-    const urlObj = new URL(url);
     const options: Parameters<typeof fetch>[1] = {
       method,
       headers,
       body,
       signal: ctrl.signal,
-      dispatcher: agentHttp,
     };
     
     const res = await fetch(url, options);

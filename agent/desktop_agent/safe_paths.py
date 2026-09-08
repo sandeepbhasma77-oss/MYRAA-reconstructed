@@ -56,17 +56,8 @@ def resolve_friendly(text: str) -> Path | None:
             return _alias_root(alias)
     return None
 
-def resolve_safe(path: str, alias: str = '') -> Path:
-    """Resolve a user path, constraining writes to safe roots."""
-    if alias:
-        root = _alias_root(alias)
-        if root is None:
-            raise ValueError(f'Unknown folder alias: {alias}')
-        return root
-    p = Path(path).expanduser()
-    if not p.is_absolute():
-        base = _alias_root('documents') or Path.home()
-        p = base / p
+def _guard_system(p: Path) -> Path:
+    """Refuse UAC-protected system locations. Never bypass Windows security."""
     blocked = [Path(r'C:\Windows'), Path(r'C:\Program Files'), Path(r'C:\Program Files (x86)')]
     for b in blocked:
         try:
@@ -77,10 +68,45 @@ def resolve_safe(path: str, alias: str = '') -> Path:
                 raise
     return p
 
+
+def resolve_safe(path: str, alias: str = '') -> Path:
+    """Resolve a user path, constraining writes to safe roots."""
+    if alias:
+        root = _alias_root(alias)
+        if root is None:
+            raise ValueError(f'Unknown folder alias: {alias}')
+        return root
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        # Alias-leading relative paths: 'Desktop\\hello.txt' means the real
+        # Desktop — without this it would misland as Documents\\Desktop\\...
+        # (the default base below). Only single-segment known-folder names.
+        import re as _re
+        parts = [s for s in _re.split(r'[\\/]', (path or '').strip()) if s not in ('', '.')]
+        if parts:
+            root = _alias_root(parts[0])
+            if root is not None:
+                rest = parts[1:]
+                if any(s == '..' for s in rest):
+                    raise ValueError(f'Refusing path traversal: {path}')
+                return _guard_system(root.joinpath(*rest) if rest else root)
+        base = _alias_root('documents') or Path.home()
+        p = base / p
+    return _guard_system(p)
+
 def check_path_access(path: str) -> dict:
     """Diagnose a path without touching security settings. Read-only probe + write probe file."""
+    # Friendly phrases ('desktop', 'my documents') resolve to the real folders.
+    # Absolute paths are probed exactly as given (never reinterpreted).
+    resolved_via = ''
     p = Path(path).expanduser()
-    out = {'path': str(p), 'exists': False, 'readable': False, 'writable': False,
+    if not p.is_absolute():
+        friendly = resolve_friendly(path or '')
+        if friendly is not None:
+            resolved_via = str(friendly)
+            p = friendly
+    out = {'path': str(p), 'requested': str(path), 'resolved_via': resolved_via,
+           'exists': False, 'readable': False, 'writable': False,
            'is_directory': False, 'requires_elevation': False, 'reason': ''}
     try:
         out['exists'] = p.exists()

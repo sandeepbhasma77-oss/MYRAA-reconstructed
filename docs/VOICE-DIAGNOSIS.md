@@ -78,16 +78,22 @@ RMS, peak, clipping %, zero-crossings) with deltas and a MODIFIED_BY
 verdict (bit-identical = source path clean; differs = MYRAA stage).
 Live playback uses exactly one pipeline per voice session
 (`voice_session_id` + `playback_session_id` in every AUDIO log) with a
-~120 ms jitter buffer, 350 ms gap-wait/skip, and underflow counting.
-Per-test status:
+180 ms adaptive jitter buffer, 250 ms gap-wait/skip, smooth-turn buffering
+(target 0.16 s, min-fast rate 1.1x, 0.3 s mid-turn reserve), 64 ms mic chunks,
+cached pipeline flags (no per-chunk storage I/O), and underflow counting.
+Per-test status (2026-09-08):
 
 ```text
 TEST A (raw Gemini dump): ARMED — needs MYRAA_VOICE_DUMP=1 + 1 voice turn
 TEST B (playback dump):   ARMED — needs UI Diag:ON + 1 voice turn
 TEST C (A/B compare):     LOGIC TESTED (synthetic dumps, incl. RMS/peak stats) — live data pending
-TEST D (device check):    PASS — audio_devices live (render + capture formats, no HFP assumed; verify on hardware)
-TEST E (headphones):      BLOCKED — no hardware access here
-TEST F (direct file):     BLOCKED — no dump captured yet (quota 429 + no mic)
+TEST D (device check):    PASS — audio_devices live: 9 render devices, default
+                          "Speaker (Realtek(R) Audio)", no HFP hands-free profile
+                          in render list. Still verify manually: Enhancements OFF,
+                          Spatial OFF, mmsys.cpl Communications = Do nothing,
+                          no Dolby/DTS/Realtek/Waves FX on the test device.
+TEST E (headphones):      BLOCKED — needs human listening on user hardware
+TEST F (direct file):     BLOCKED — no live dump captured yet
 ```
 
 Live capture pending: Gemini free-tier quota 429-exhausted + no mic/speaker
@@ -160,6 +166,9 @@ while the turn is still arriving, scheduling pauses and resumes from the exact
 next unplayed chunk (never replay, never drop) at turn end or buffer recovery.
 
 * Opt-out streaming (experiment only): `myraa_live_stream='1'`.
+* Current tunables (2026-09-08): `SMOOTH_TARGET_SEC=0.16`,
+  `SMOOTH_MIN_FAST_RATE=1.1`, `SMOOTH_RESERVE_SEC=0.3`,
+  `DEFAULT_JITTER_BUFFER_SEC=0.18`, `maxGapWaitMs=250`, mic 1024 frames @16 kHz.
 * `SMOOTH_START` log: buffered seconds, measured rate, early-stream flag.
 * `SMOOTH_PAUSE` / `SMOOTH_RESUME` trace reserve holds.
 * Summary carries `playMode=`, `bufBeforePlay=`, `waitedComplete=`,

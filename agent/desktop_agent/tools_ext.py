@@ -185,6 +185,11 @@ def application_exists(name: str) -> dict:
     found = False
     for p in psutil.process_iter(['name']):
         pn = (p.info.get('name', '') or '').lower().replace('.exe', '')
+        # Ghost guard: unreadable system processes report '' as name, and
+        # '' is a substring of everything — without this, EVERY app always
+        # looks "running".
+        if not pn:
+            continue
         if pn == key or key in pn or pn in key or (me and (me in pn or pn in me)):
             found = True
             break

@@ -71,13 +71,103 @@ def open_application(name: str) -> str:
         raise ToolError(f'Could not open {name}: {e}')
 
 def close_application(name: str, force: bool = False) -> str:
-    flag = '/F' if force else ''
+    # Resolve the REAL running process first: Store apps run under different
+    # names (Calculator -> CalculatorApp.exe), and an empty taskkill flag arg
+    # breaks the command. Kill by PID precisely, verify, report honestly.
+    import os as _os
+    q = (name or '').strip().lower().replace('.exe', '')
+    if not q:
+        raise ToolError('application name required.')
+    me = _os.getpid()
+    cands: list[tuple[int, str]] = []
     try:
-        subprocess.run(['taskkill', flag, '/IM', f'{name}.exe' if not name.lower().endswith('.exe') else name],
-                       capture_output=True, text=True, check=False)
-        return f'Close requested for {name}.'
-    except Exception as e:
-        raise ToolError(str(e))
+        if psutil is not None:
+            for p in psutil.process_iter(['pid', 'name']):
+                try:
+                    pn = (p.info.get('name', '') or '')
+                    pl = pn.lower().replace('.exe', '')
+                    if not pl or p.info.get('pid') == me:
+                        continue
+                    if pl == q or q in pl or pl in q:
+                        cands.append((p.info['pid'], pn))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    # Never suicide: drop anything python/uvicorn hosting this agent.
+    cands = [(pid, pn) for pid, pn in cands
+             if pn.lower() not in ('python.exe', 'pythonw.exe', 'uvicorn.exe', 'myraa-agent.exe')]
+    killed = []
+    # Store/UWP apps (Calculator, Photos) ignore graceful taskkill, so escalate
+    # to /F automatically when a polite close does not take. Reported honestly.
+    forced = False
+    for attempt in (False, True):
+        if attempt and (force or not killed):
+            forced = True
+        if cands:
+            # No skip for already-signalled PIDs: a polite taskkill reports
+            # success while Store apps ignore it — escalation must re-run /F
+            # on the same PIDs (harmless if already dead: nonzero rc, ignored).
+            for pid, pn in cands:
+                try:
+                    args = ['taskkill', '/PID', str(pid)]
+                    if force or attempt:
+                        args.append('/F')
+                    r = subprocess.run(args, capture_output=True, text=True, check=False)
+                    if r.returncode == 0:
+                        killed.append(f'{pn}({pid})')
+                except Exception:
+                    continue
+        else:
+            # Fallback: classic /IM with a properly built arg list (no empty flag).
+            base = q if q.endswith('.exe') else q + '.exe'
+            args = ['taskkill', '/IM', base]
+            if force or attempt:
+                args.append('/F')
+            try:
+                r = subprocess.run(args, capture_output=True, text=True, check=False)
+                if r.returncode == 0:
+                    killed.append(base)
+            except Exception as e:
+                raise ToolError(f'Could not close {name}: {e}')
+        # Verify before escalating.
+        time.sleep(0.8)
+        alive = _procs_matching(q)
+        if not alive:
+            break
+        if not force and not attempt:
+            continue  # polite failed: escalate once
+        break
+    # Final verdict: honest result, never a blind "requested".
+    still = _procs_matching(q)
+    tag = ' (forced)' if forced and killed else ''
+    if killed and not still:
+        return f'Closed {name}{tag} ({", ".join(killed)}).'
+    if killed:
+        raise ToolError(f'Close sent to {name} ({", ".join(killed)}) but it is still running: '
+                        f'{", ".join(sorted(set(still)))}.')
+    if still:
+        raise ToolError(f'Could not close {name}: still running ({", ".join(sorted(set(still)))}).')
+    return f'{name} was not running.'
+
+
+def _procs_matching(q: str) -> list:
+    """Process names matching a query. Skips empty names (ghost guard: unreadable
+    system processes report '' and '' is a substring of everything)."""
+    out = []
+    try:
+        if psutil is not None:
+            for p in psutil.process_iter(['name']):
+                try:
+                    pn = p.info.get('name', '') or ''
+                    pl = pn.lower().replace('.exe', '')
+                    if pl and (pl == q or q in pl or pl in q):
+                        out.append(pn)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return out
 
 SITE_SHORTCUTS = {'youtube': 'https://www.youtube.com', 'gmail': 'https://mail.google.com',
                   'google': 'https://www.google.com', 'github': 'https://github.com',
