@@ -326,7 +326,40 @@ def _grab() -> str:
     except Exception as e:
         raise ToolError(f'Screen capture failed: {e}')
 
-def take_screenshot(include_image: bool = False, max_dim: int = 1280) -> str:
+def _grab_image(max_dim: int = 960) -> dict:
+    """Capture + downscale + base64 PNG so MYRAA can SEE the screen.
+
+    The dict flows through /execute -> server, which injects imageBase64 as a
+    live video frame for Gemini (function responses are text-only) and strips
+    the bulky payload from the spoken/text result. max_dim caps tokens/latency.
+    """
+    try:
+        import mss  # type: ignore
+        with mss.mss() as sct:
+            mon = sct.monitors[1]
+            shot = sct.grab(mon)
+            w, h = shot.width, shot.height
+            try:
+                from PIL import Image  # type: ignore
+                import io as _io
+                import base64 as _b64
+                img = Image.frombytes('RGB', (w, h), shot.rgb)
+                scale = min(1.0, float(max_dim) / max(w, h)) if max(w, h) > 0 else 1.0
+                if scale < 1.0:
+                    img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+                buf = _io.BytesIO()
+                img.save(buf, format='PNG', optimize=True)
+                return {'message': f'Screenshot {w}x{h} captured (image attached).',
+                        'imageBase64': _b64.b64encode(buf.getvalue()).decode('ascii'),
+                        'mimeType': 'image/png', 'width': w, 'height': h}
+            except ImportError:
+                return {'message': f'Screenshot {w}x{h} captured (no PIL: image unavailable).'}
+    except Exception as e:
+        raise ToolError(f'Screen capture failed: {e}')
+
+def take_screenshot(include_image: bool = False, max_dim: int = 1280):
+    if include_image:
+        return _grab_image(max_dim=int(max_dim or 1280))
     return _grab()
 
 def save_screenshot(name: str = 'screenshot') -> str:
@@ -344,11 +377,13 @@ def save_screenshot(name: str = 'screenshot') -> str:
     except Exception as e:
         raise ToolError(f'Screen capture failed: {e}')
 
-def analyze_screenshot(max_chars: int = 1500) -> str:
-    return _grab() + ' (OCR not bundled; wire easyocr/pytesseract for text.)'
+def analyze_screenshot(max_chars: int = 1500):
+    # Image attached: MYRAA sees it directly (no OCR needed).
+    return _grab_image()
 
-def read_screen(max_chars: int = 1500) -> str:
-    return _grab() + ' (OCR not bundled; wire easyocr/pytesseract for text.)'
+def read_screen(max_chars: int = 1500):
+    # Image attached: MYRAA reads it directly (no OCR needed).
+    return _grab_image()
 
 # ---- desktop browser (Playwright, optional) ----
 def _browser_stub(*a, **k) -> str:

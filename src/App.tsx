@@ -71,13 +71,14 @@ function getABMode(): 'A' | 'B' {
 }
 // SMOOTH VOICE MODE (default): buffer each turn briefly and start playback once
 // enough audio is queued (or at turn completion), so speech plays as one
-// continuous sentence. LATENCY FIX: target lowered 0.5s -> 0.22s and the
+// continuous sentence. LATENCY FIX: target lowered 0.5s -> 0.16s and the
 // min-fast rate 1.25x -> 1.1x so fast deliveries start speaking almost
-// immediately instead of waiting for a full turn. Optional low-latency
-// streaming for later experiments: localStorage 'myraa_live_stream' === '1'
-// restores immediate per-chunk playback. Override (testing only):
-// localStorage 'myraa_smooth_ms' (clamped 120–2,000 ms).
-const SMOOTH_TARGET_SEC = 0.22;
+// immediately instead of waiting for a full turn. Cut protection stays via
+// SMOOTH_RESERVE_SEC (mid-turn pause) + gap-wait + boundary crossfades.
+// Optional low-latency streaming for later experiments: localStorage
+// 'myraa_live_stream' === '1' restores immediate per-chunk playback. Override
+// (testing only): localStorage 'myraa_smooth_ms' (clamped 120–2,000 ms).
+const SMOOTH_TARGET_SEC = 0.16;
 const SMOOTH_MAX_BUFFER_SEC = 30;
 const SMOOTH_RESERVE_SEC = 0.3;
 const SMOOTH_MIN_FAST_RATE = 1.1;

@@ -179,6 +179,26 @@ def caps():
 def health():
     return {'ok': True, 'tool_count': len(REGISTRY), 'version': tools.VERSION}
 
+
+@app.on_event('startup')
+def _warm_caches():
+    """Pre-build the app index in background so the first 'open X' is instant.
+
+    The slow pole (powershell Get-StartApps) runs here once at boot instead of
+    blocking the first voice command. Daemon thread: never delays readiness.
+    """
+    try:
+        import threading as _th
+
+        def _run():
+            try:
+                tools_ext.build_application_index()
+            except Exception:
+                pass
+        _th.Thread(target=_run, name='myraa-index-warm', daemon=True).start()
+    except Exception:
+        pass
+
 @app.post('/execute')
 def execute(req: ExecuteRequest):
     log.info('EXEC tool=%s args=%s', req.tool, req.args)

@@ -1007,6 +1007,29 @@ APP_ALIASES = {
     'wordpad': ['wordpad'],
     'snipping tool': ['snipping tool', 'snip', 'snippingtool'],
     'control panel': ['control panel', 'control'],
+    'vlc': ['vlc', 'vlc media player'],
+    'zoom': ['zoom', 'zoom workplace'],
+    'teams': ['teams', 'microsoft teams'],
+    'outlook': ['outlook', 'microsoft outlook', 'mail'],
+    'onenote': ['onenote', 'one note'],
+    'sticky notes': ['sticky notes', 'stickynotes', 'notes'],
+    'photos': ['photos', 'microsoft photos'],
+    'camera': ['camera', 'windows camera'],
+    'store': ['store', 'microsoft store'],
+    'xbox': ['xbox', 'xbox game bar'],
+    'clock': ['clock', 'alarms'],
+    'weather': ['weather', 'msn weather'],
+    'calendar': ['calendar', 'windows calendar'],
+    'illustrator': ['illustrator', 'adobe illustrator'],
+    'premiere': ['premiere', 'adobe premiere', 'premiere pro'],
+    'pycharm': ['pycharm', 'pycharm community'],
+    'intellij': ['intellij', 'intellij idea'],
+    'postman': ['postman'],
+    'figma': ['figma'],
+    'slack': ['slack'],
+    'anydesk': ['anydesk'],
+    'notepad++': ['notepad++', 'notepad plus plus'],
+    'media player': ['media player', 'windows media player'],
 }
 
 # Safe Windows system targets (Layer 2). Launched via PATH lookup or shell URI —
@@ -1024,6 +1047,11 @@ _SYSTEM_APPS = {
     'control panel': 'control.exe',
     'terminal': 'wt.exe',
     'settings': 'ms-settings:',
+    'store': 'ms-windows-store:',
+    'xbox': 'xbox://',
+    'sticky notes': 'stickynotes.exe',
+    'notepad++': 'notepad++.exe',
+    'vlc': 'vlc.exe',
 }
 
 def _norm_app_text(text: str) -> str:
@@ -1185,8 +1213,9 @@ def _scan_uninstall() -> list:
 def _scan_startapps() -> list:
     out = []
     try:
+        # Fast timeout: warmed at agent startup; voice path must never hang here.
         r = subprocess.run(['powershell', '-NoProfile', '-Command', 'Get-StartApps | ConvertTo-Json'],
-                           capture_output=True, text=True, timeout=25)
+                           capture_output=True, text=True, timeout=12)
         apps = _json.loads(r.stdout or '[]')
         if isinstance(apps, dict):
             apps = [apps]

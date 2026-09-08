@@ -19,3 +19,8 @@ task-counter.txt
 # large binaries
 *.exe
 *.zip
+# runtime voice/debug dumps — generated, never commit
+diagnostics/
+debug/
+*.pcm
+*.wav

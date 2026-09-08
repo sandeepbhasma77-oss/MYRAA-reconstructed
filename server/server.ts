@@ -134,10 +134,10 @@ function desktopToolDeclarations() {
     pasteClipboard: { description: 'Paste/type text via clipboard.', parameters: obj({ text: { type: S } }) },
     getClipboard: { description: 'Read clipboard text.', parameters: obj({ max_chars: { type: I } }) },
     clearClipboard: { description: 'Clear the clipboard.', parameters: obj({}) },
-    takeScreenshot: { description: 'Screenshot (fails headless/VM without display).', parameters: obj({ include_image: { type: B }, max_dim: { type: I } }) },
+    takeScreenshot: { description: 'SEE the screen: pass include_image=true and the screenshot arrives as an image you can describe. (fails headless/VM without display).', parameters: obj({ include_image: { type: B }, max_dim: { type: I } }) },
     saveScreenshot: { description: 'Save screenshot to file.', parameters: obj({ name: { type: S } }) },
-    analyzeScreenshot: { description: 'Screenshot structure summary.', parameters: obj({ max_chars: { type: I } }) },
-    readScreen: { description: 'OCR/read screen text.', parameters: obj({ max_chars: { type: I } }) },
+    analyzeScreenshot: { description: 'SEE the screen: screenshot arrives as an image — describe what is visible.', parameters: obj({ max_chars: { type: I } }) },
+    readScreen: { description: 'SEE the screen: screenshot arrives as an image — read all visible text aloud.', parameters: obj({ max_chars: { type: I } }) },
     desktopBrowserOpen: { description: 'STUB: desktop browser open (not implemented).', parameters: obj({}) },
     desktopBrowserNavigate: { description: 'STUB: desktop browser navigate (not implemented).', parameters: obj({}) },
     desktopBrowserOpenTab: { description: 'STUB: desktop browser open tab (not implemented).', parameters: obj({}) },
@@ -163,7 +163,7 @@ function desktopToolDeclarations() {
     disableAutoStart: { description: 'Disable launch at Windows login.', parameters: obj({}) },
     getAutoStartStatus: { description: 'Check auto-start status.', parameters: obj({}) },
     // --- extended real-control tools (permission in description: L0 safe, L1 action, L2 sensitive, L3 critical) ---
-    launch_application: { description: '[L1] Launch a Windows app by exe name. Verifies the process exists.', parameters: obj({ name: { type: S } }, ['name']) },
+    launch_application: { description: '[L1] Launch any installed Windows app by name (Chrome, Notepad, Spotify, VS Code, anything in Start Menu). Prefer findApplication first when unsure of the exact name. Verifies the process is running.', parameters: obj({ name: { type: S } }, ['name']) },
     list_running_applications: { description: '[L0] List running process names.', parameters: obj({ limit: { type: I } }) },
     application_exists: { description: '[L0] Check whether an app/process is running.', parameters: obj({ name: { type: S } }, ['name']) },
     restart_application: { description: '[L1] Close then relaunch an app.', parameters: obj({ name: { type: S } }, ['name']) },
@@ -580,8 +580,21 @@ export async function startServer(): Promise<void> {
                       task_id: taskId, status: r.ok ? 'COMPLETED' : 'FAILED',
                       message: r.ok ? 'Done.' : friendlyFailMessage(fc.name, r.error), tool: fc.name,
                     });
+                    // SCREEN VISION: screenshot tools return {imageBase64}. Function
+                    // responses are text-only, so inject the frame as live video
+                    // input (Gemini SEES it) and keep only a short note in text.
+                    let toolResult: unknown = (r.result ?? { result: 'Done.' });
+                    const maybeImg = (toolResult ?? {}) as { imageBase64?: unknown; message?: unknown };
+                    if (r.ok && typeof maybeImg.imageBase64 === 'string' && maybeImg.imageBase64.length > 100) {
+                      const b64 = maybeImg.imageBase64;
+                      sessionCall('screen-frame', () => sessionRef?.sendRealtimeInput({
+                        video: { data: b64, mimeType: 'image/png' },
+                      }));
+                      diag(`screen frame injected (${b64.length} b64 chars) name=${fc.name}`);
+                      toolResult = { result: `${String(maybeImg.message || 'Screenshot captured.')} The current screen image was just shown to you — describe what you see.` };
+                    }
                     const out = r.ok
-                      ? { result: (r.result ?? { result: 'Done.' }) as never, verified: (r as { verified?: boolean }).verified ?? false }
+                      ? { result: toolResult as never, verified: (r as { verified?: boolean }).verified ?? false }
                       : { result: `Desktop control error: ${r.error}` };
                     sessionCall('tool-response-desktop', () => sessionRef?.sendToolResponse({ functionResponses: [{ name: fc.name, response: { output: out }, id: fc.id }] }));
                   } finally {
