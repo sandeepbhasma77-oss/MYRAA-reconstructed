@@ -1277,9 +1277,17 @@ def _match_score(qnorm: str, alias_canon: str, entry: dict) -> tuple:
     # The alias canon naming an entry exactly (chrome→chrome.exe) wins outright.
     if alias_canon and alias_canon == en:
         return (100, 'alias')
-    if alias_canon and (alias_canon in en or en in alias_canon):
+    if alias_canon and alias_canon in en:
         return (95, 'alias')
-    if en.startswith(qnorm) or qnorm.startswith(en):
+    # Reverse substring ('code' in 'vscode') is load-bearing for short aliases,
+    # but must be length-close: otherwise 'photos' false-matches 'photoshop'.
+    if alias_canon and en in alias_canon and len(alias_canon) - len(en) <= 2:
+        return (95, 'alias')
+    # Prefix counts only when the ENTRY extends the query (user said a leading
+    # fragment: 'photo' -> Photos, 'visual studio' -> Visual Studio Code).
+    # The reverse (query extends entry: 'photoshop' vs 'photos') is almost
+    # always a DIFFERENT app, so it falls through to contains/fuzzy instead.
+    if en.startswith(qnorm):
         return (80, 'prefix')
     if qnorm in en:
         return (70, 'contains')
